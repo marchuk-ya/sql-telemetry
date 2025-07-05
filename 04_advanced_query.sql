@@ -28,49 +28,38 @@ sensor_data_pivoted AS (
     FROM sensor_averages
     GROUP BY room, timestamp_second
 ),
--- For each V timestamp, find the most recent R value
-v_with_previous_r AS (
+-- Generate complete time series with all seconds between min and max timestamps
+time_series AS (
     SELECT 
-        vt.room,
-        vt.timestamp_second,
-        sdp.V,
+        room,
+        generate_series(
+            MIN(timestamp_second),
+            MAX(timestamp_second),
+            INTERVAL '1 second'
+        ) AS timestamp_second
+    FROM v_timestamps
+    GROUP BY room
+),
+-- Fill missing timestamps with previous values using window functions
+filled_data AS (
+    SELECT 
+        ts.room,
+        ts.timestamp_second,
+        -- Fill V values: use the most recent V value up to current timestamp
+        FIRST_VALUE(sdp.V) OVER (
+            PARTITION BY ts.room 
+            ORDER BY sdp.timestamp_second DESC
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS V,
+        -- Fill R values: use the most recent R value up to current timestamp
         FIRST_VALUE(sdp.R) OVER (
-            PARTITION BY vt.room 
+            PARTITION BY ts.room 
             ORDER BY sdp.timestamp_second DESC
             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
         ) AS R
-    FROM v_timestamps vt
-    LEFT JOIN sensor_data_pivoted sdp ON vt.room = sdp.room 
-        AND sdp.timestamp_second <= vt.timestamp_second
-        AND sdp.R IS NOT NULL
-),
-r_with_previous_v AS (
-    SELECT 
-        room,
-        timestamp_second,
-        FIRST_VALUE(V) OVER (
-            PARTITION BY room 
-            ORDER BY timestamp_second DESC
-            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-        ) AS V,
-        R
-    FROM sensor_data_pivoted 
-    WHERE R IS NOT NULL
-),
--- Combine V-driven and R-driven data
-combined_data AS (
-    SELECT room, timestamp_second, V, R FROM v_with_previous_r
-    UNION
-    SELECT room, timestamp_second, V, R FROM r_with_previous_v
-),
-final_data AS (
-    SELECT 
-        room,
-        timestamp_second,
-        MAX(V) AS V,
-        MAX(R) AS R
-    FROM combined_data
-    GROUP BY room, timestamp_second
+    FROM time_series ts
+    LEFT JOIN sensor_data_pivoted sdp ON ts.room = sdp.room 
+        AND sdp.timestamp_second <= ts.timestamp_second
 )
 
 SELECT 
@@ -82,5 +71,5 @@ SELECT
     END AS I,
     ROUND(V::DECIMAL(10, 3), 3) AS V,
     ROUND(R::DECIMAL(10, 3), 3) AS R
-FROM final_data
+FROM filled_data
 ORDER BY room, timestamp_second; 

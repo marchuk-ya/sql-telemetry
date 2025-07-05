@@ -6,7 +6,7 @@ CREATE TABLE rooms (
 
 CREATE TABLE sensors (
     id SERIAL PRIMARY KEY,
-    name VARCHAR(100) UNIQUE NOT NULL,
+    name VARCHAR(100) NOT NULL,
     room_id INTEGER NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
     sensor_type CHAR(1) NOT NULL CHECK (sensor_type IN ('V', 'R')),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
